@@ -1,0 +1,7 @@
+# Raw data files
+LLCP2022.XPT
+
+# RStudio and R temporary files
+.Rhistory
+.RData
+.Rproj.user
