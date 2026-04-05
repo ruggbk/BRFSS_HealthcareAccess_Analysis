@@ -1,5 +1,6 @@
 # Raw data files
-LLCP2022.XPT
+*.XPT
+USCODE24_LLCP_082125.HTML
 
 # RStudio and R temporary files
 .Rhistory

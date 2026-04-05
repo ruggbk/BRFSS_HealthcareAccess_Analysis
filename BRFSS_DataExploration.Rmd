@@ -4,20 +4,89 @@ author: "Brandon Rugg"
 date: "2026-04-02"
 output: html_notebook
 ---
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(haven)
+library(dplyr)
+library(survey)
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
-
-```{r}
-plot(cars)
-```
-```{r}
-
+source("R/utils.R")
 ```
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+Dataset and documentation available at https://www.cdc.gov/brfss/annual_data/annual_2024.html
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+```{r read_data}
+# Import the 2024 BRFSS dataset (SAS Transport Format)
+brfss_data <- read_xpt("data/LLCP2024.XPT")
 
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+# Generate summary table of all variables. Labels are truncated-- the full titles are available in the 2024 BRFSS Codebook CDC.
+var_dict <- build_variable_dictionary(brfss_data)
+head(var_dict)
+```
+
+```{r}
+# List of columns to keep
+keep_vars <- c("_STATE", "_LLCPWT", "_PSU", "_STSTR", 
+               "_AGEG5YR", "_SEX", "_RACEGR3", "_URBSTAT",
+               "_FLSHOT7", "_PNEUMO3", "_AIDTST4", "_CRVSCRN",
+               "_BMI5CAT", "_RFSMOK3")
+
+# Create smaller dataframe for more efficient analysis
+brfss_small <- brfss_data[, keep_vars]
+var_dict_small <- build_variable_dictionary(brfss_small)
+```
+---
+## Analysis of flu shot coverage for those > 65 years of age
+
+Variable `_FLSHOT7` already only includes those 65+. A response of '9' indicates 'Don't know/Not Sure' Or 'Refused/Missing'. Dropped for analysis.
+```{r}
+# Clean the flu shot variable and remove missing codes
+flu_data <- brfss_small[, c("_FLSHOT7", "_PSU", "_STSTR", "_LLCPWT", "_STATE")]
+flu_data$flu_shot_clean <- ifelse(flu_data$`_FLSHOT7` %in% c(9, NA), NA, flu_data$`_FLSHOT7`)
+
+# Calculate percentage of '9's in each state to make sure state-by-state comparison is valid after dropping
+pct_9_by_state <- brfss_small %>%
+  group_by(`_STATE`) %>%
+  summarize(
+    n_total = n(),
+    n_9 = sum(`_FLSHOT7` == 9, na.rm = TRUE),
+    pct_9 = n_9 / n_total * 100
+  ) %>%
+  arrange(desc(pct_9))  # sort from highest to lowest
+
+pct_9_by_state
+```
+
+% of respondents answering "9" for `_FLSHOT7` varies between 8.05 and 1.25% state-by-state. As it's relatively low, it seems unlikely that it would meaningfully bias interstate comparisons.
+
+```{r}
+# Adjust for "lonely" PSUs (strata with only one PSU) in variance estimation
+options(survey.lonely.psu = "adjust")
+
+# Define the survey design for flu vaccination data
+flu_design <- svydesign(
+  id = ~`_PSU`,           # Primary Sampling Unit
+  strata = ~`_STSTR`,     # Stratification variable
+  weights = ~`_LLCPWT`,   # Survey weights
+  data = flu_data,
+  nest = TRUE            # Indicates nested structure
+)
+
+# Estimate the mean flu vaccination rate
+flu_est <- svymean(~factor(flu_shot_clean), design = flu_design, na.rm = TRUE)
+
+flu_est
+```
+```{r}
+# Format results for readability
+flu_yes <- coef(flu_est)[1]
+flu_ci  <- confint(flu_est)[1, ]
+
+cat(sprintf(
+  "Flu vaccination rate (age 65+): %.1f%% (95%% CI: %.1f%%–%.1f%%)\n",
+  flu_yes * 100,
+  flu_ci[1] * 100,
+  flu_ci[2] * 100
+))
+```
+
