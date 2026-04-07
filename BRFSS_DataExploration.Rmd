@@ -7,7 +7,6 @@ output: html_notebook
 ```{r setup, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(haven)
-library(dplyr)
 library(survey)
 library(knitr)
 library(kableExtra)
@@ -177,7 +176,7 @@ plot_usmap(
 ```
 *Note: Tennessee is absent from the 2024 BRFSS public dataset. [CDC BRFSS 2024 documentation](https://www.cdc.gov/brfss/annual_data/annual_2024.html).*
 
-### Comparison of urban vs rural populations
+### Comparison of flu vaccination rates (65+) for urban vs rural populations
 ```{r}
 # Estimate mean flu vaccination by urban/rural
 flu_urban_est <- svyby(
@@ -201,3 +200,48 @@ flu_urban_est <- flu_urban_est %>%
 # Display
 flu_urban_est[, c("urban_rural", "flu_rate", "lower_ci", "upper_ci")]
 ```
+### Comparison of flu vaccination rates (65+) by ethnicity
+```{r}
+# Weighted mean by race (65+), ignoring 9 (Don't know/Refused)
+flu_race_est <- svyby(
+  ~factor(flu_shot_clean),
+  ~factor(ifelse(`_RACEGR3` %in% c(1,2,3,4,5), `_RACEGR3`, NA)),
+  design = flu_design,
+  FUN = svymean,
+  na.rm = TRUE
+)
+
+# Official 5-level race/ethnicity labels
+race_labels <- c(
+  "White only, Non-Hispanic",
+  "Black only, Non-Hispanic",
+  "Other race only, Non-Hispanic",
+  "Multiracial, Non-Hispanic",
+  "Hispanic"
+)
+
+# Explicit column names for "Yes" and its SE
+rate_col <- "factor(flu_shot_clean)1"
+se_col   <- "se.factor(flu_shot_clean)1"
+
+# Print percentages with 95% CIs
+for (i in seq_along(race_labels)) {
+  rate <- flu_race_est[[rate_col]][i]
+  se   <- flu_race_est[[se_col]][i]
+  lower <- rate - 1.96 * se
+  upper <- rate + 1.96 * se
+  
+  cat(sprintf(
+    "Flu vaccination rate (%s, 65+): %.1f%% (95%% CI: %.1f%%–%.1f%%)\n",
+    race_labels[i],
+    rate * 100,
+    lower * 100,
+    upper * 100
+  ))
+}
+```
+```{r}
+# Inspect column names once
+names(flu_race_est)
+```
+
