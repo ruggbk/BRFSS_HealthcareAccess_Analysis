@@ -37,14 +37,19 @@ keep_vars <- c("_STATE", "_LLCPWT", "_PSU", "_STSTR",
 brfss_small <- brfss_data[, keep_vars]
 var_dict_small <- build_variable_dictionary(brfss_small)
 ```
+```{r}
+# Optional after creating the smaller working dataset
+rm(brfss_data)      # Remove the large original
+gc()                # Run garbage collection to free memory
+```
+
 ---
 ## Analysis of flu shot coverage for those > 65 years of age
 
 Variable `_FLSHOT7` already only includes those 65+. A response of '9' indicates 'Don't know/Not Sure' Or 'Refused/Missing'. Dropped for analysis.
 ```{r}
 # Clean the flu shot variable and remove missing codes
-flu_data <- brfss_small[, c("_FLSHOT7", "_PSU", "_STSTR", "_LLCPWT", "_STATE")]
-flu_data$flu_shot_clean <- ifelse(flu_data$`_FLSHOT7` %in% c(9, NA), NA, flu_data$`_FLSHOT7`)
+brfss_small$flu_shot_clean <- ifelse(flu_data$`_FLSHOT7` %in% c(9, NA), NA, flu_data$`_FLSHOT7`)
 
 # Calculate percentage of '9's in each state to make sure state-by-state comparison is valid after dropping
 pct_9_by_state <- brfss_small %>%
@@ -70,7 +75,7 @@ flu_design <- svydesign(
   id = ~`_PSU`,           # Primary Sampling Unit
   strata = ~`_STSTR`,     # Stratification variable
   weights = ~`_LLCPWT`,   # Survey weights
-  data = flu_data,
+  data = brfss_small,
   nest = TRUE            # Indicates nested structure
 )
 
@@ -172,3 +177,27 @@ plot_usmap(
 ```
 *Note: Tennessee is absent from the 2024 BRFSS public dataset. [CDC BRFSS 2024 documentation](https://www.cdc.gov/brfss/annual_data/annual_2024.html).*
 
+### Comparison of urban vs rural populations
+```{r}
+# Estimate mean flu vaccination by urban/rural
+flu_urban_est <- svyby(
+  ~factor(flu_shot_clean),
+  ~`_URBSTAT`,
+  design = flu_design,
+  FUN = svymean,
+  na.rm = TRUE
+)
+
+# Format results
+flu_urban_est <- flu_urban_est %>%
+  mutate(
+    flu_rate = `factor(flu_shot_clean)1`,      # vaccination = 1 (yes)
+    flu_se = `se.factor(flu_shot_clean)1`,
+    lower_ci = flu_rate - 1.96 * flu_se,
+    upper_ci = flu_rate + 1.96 * flu_se,
+    urban_rural = ifelse(`_URBSTAT` == 1, "Urban", "Rural")
+  )
+
+# Display
+flu_urban_est[, c("urban_rural", "flu_rate", "lower_ci", "upper_ci")]
+```

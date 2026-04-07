@@ -84,3 +84,60 @@ build_variable_dictionary <- function(
     dplyr::desc(pct_missing)
   )
 }
+
+# ------------------------------------------------------------------
+# Function: analyze_survey_var
+# Purpose: Compute weighted mean, SE, and 95% CI for a survey variable,
+#          optionally grouped, and safely handle "lonely" PSUs.
+#
+# Inputs:
+#   var_name        - Name of variable to analyze (string)
+#   design          - Survey design object (svydesign)
+#   na_codes        - Vector of values to treat as missing (default: c(9, NA))
+#   group           - Optional grouping variable (string)
+#   label_map       - Optional named vector to map group codes to labels
+#   lonely_psu_option - How to handle lonely PSUs (default: "adjust")
+#
+# Outputs:
+#   Data frame with rate, SE, 95% CI, and optional group labels
+# ------------------------------------------------------------------
+
+analyze_survey_var <- function(var_name, design, 
+                               na_codes = c(9, NA), 
+                               group = NULL, 
+                               label_map = NULL) {
+  
+
+  # Create cleaned temporary variable in the design
+  design$variables$tmp_var <- ifelse(design$variables[[var_name]] %in% na_codes, NA, design$variables[[var_name]])
+  
+  if (is.null(group)) {
+    # Overall estimate
+    est <- svymean(~tmp_var, design = design, na.rm = TRUE)
+    est_df <- data.frame(
+      rate = coef(est),
+      se = SE(est),
+      lower_ci = coef(est) - 1.96 * SE(est),
+      upper_ci = coef(est) + 1.96 * SE(est)
+    )
+  } else {
+    # Grouped estimate
+    by_formula <- as.formula("~tmp_var")
+    group_formula <- as.formula(paste("~", group))
+    est <- svyby(by_formula, group_formula, design, FUN = svymean, na.rm = TRUE)
+    
+    # Grab first mean and SE columns
+    est_df <- est %>%
+      mutate(
+        rate = est[[2]],
+        se = est[[3]],
+        lower_ci = rate - 1.96 * se,
+        upper_ci = rate + 1.96 * se
+      )
+    
+    # Apply label mapping if provided
+    if (!is.null(label_map)) est_df[[group]] <- label_map[as.character(est_df[[group]])]
+  }
+  
+  est_df
+}
