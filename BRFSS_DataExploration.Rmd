@@ -10,8 +10,13 @@ library(haven)
 library(survey)
 library(knitr)
 library(kableExtra)
+library(usmap)
+library(ggplot2)
+library(scales)
 
 source("R/utils.R")
+
+if (!dir.exists("outputs")) dir.create("outputs")
 ```
 
 Dataset and documentation available at https://www.cdc.gov/brfss/annual_data/annual_2024.html
@@ -48,7 +53,7 @@ gc()                # Run garbage collection to free memory
 Variable `_FLSHOT7` already only includes those 65+. A response of '9' indicates 'Don't know/Not Sure' Or 'Refused/Missing'. Dropped for analysis.
 ```{r}
 # Clean the flu shot variable and remove missing codes
-brfss_small$flu_shot_clean <- ifelse(flu_data$`_FLSHOT7` %in% c(9, NA), NA, flu_data$`_FLSHOT7`)
+brfss_small$flu_shot_clean <- ifelse(brfss_small$`_FLSHOT7` %in% c(9, NA), NA, brfss_small$`_FLSHOT7`)
 
 # Calculate percentage of '9's in each state to make sure state-by-state comparison is valid after dropping
 pct_9_by_state <- brfss_small %>%
@@ -152,10 +157,6 @@ flu_by_state %>%
 ```
 
 ```{r}
-library(usmap)
-library(ggplot2)
-library(scales)
-
 flu_by_state <- flu_by_state %>%
   mutate(state = state.abb[match(State, state.name)])
 
@@ -173,10 +174,12 @@ plot_usmap(
   ) +
   theme(legend.position = "right") +
   labs(title = "Flu Vaccination Rate (Age 65+) by State")
+
+ggsave("outputs/flu_map.png", width = 10, height = 6, dpi = 300)
 ```
 *Note: Tennessee is absent from the 2024 BRFSS public dataset. [CDC BRFSS 2024 documentation](https://www.cdc.gov/brfss/annual_data/annual_2024.html).*
 
-### Comparison of flu vaccination rates (65+) for urban vs rural populations
+### Comparison of flu vaccination rates (65+) for urban (1) vs rural (2) populations
 ```{r}
 # Estimate mean flu vaccination by urban/rural
 flu_urban_est <- svyby(
@@ -244,4 +247,37 @@ for (i in seq_along(race_labels)) {
 # Inspect column names once
 names(flu_race_est)
 ```
+### Comparison of flu vaccination rates (65+) by sex
+```{r}
+# Adjust for "lonely" PSUs (strata with only one PSU) in variance estimation
+options(survey.lonely.psu = "adjust")
+
+# Estimate mean flu vaccination by male (1) or female (2)
+flu_sex_est <- svyby(
+  ~factor(flu_shot_clean),
+  ~`_SEX`,
+  design = flu_design,
+  FUN = svymean,
+  na.rm = TRUE
+)
+
+# Format results
+flu_sex_est <- flu_sex_est %>%
+  mutate(
+    flu_rate = `factor(flu_shot_clean)1`,      # vaccination = 1 (yes)
+    flu_se = `se.factor(flu_shot_clean)1`,
+    lower_ci = flu_rate - 1.96 * flu_se,
+    upper_ci = flu_rate + 1.96 * flu_se,
+    male_female = case_when(
+      `_SEX` == 1 ~ "Male",
+      `_SEX` == 2 ~ "Female",
+      TRUE ~ NA_character_
+    )
+  )
+
+# Display
+flu_sex_est[, c("male_female", "flu_rate", "lower_ci", "upper_ci")]
+```
+
+
 
